@@ -1,6 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { travelQuestions } from '../data/travelQuestions'
+import healingIcon from '../assets/healing.png'
+import explorerIcon from '../assets/explorer.png'
+import cultureIcon from '../assets/culture.png'
+import foodieIcon from '../assets/foodie.png'
 
 const emit = defineEmits(['complete', 'skip'])
 const currentIndex = ref(0)
@@ -11,14 +15,50 @@ const selectedOptionId = computed(() => answers.value[currentQuestion.value.ques
 const isLastQuestion = computed(() => currentIndex.value === travelQuestions.length - 1)
 const progress = computed(() => ((currentIndex.value + 1) / travelQuestions.length) * 100)
 
+const optionToType = {
+  A: 'HEALING',
+  B: 'EXPLORER',
+  C: 'CULTURE',
+  D: 'FOODIE'
+}
+
+const optionIconSrc = {
+  green: healingIcon,
+  blue: explorerIcon,
+  purple: cultureIcon,
+  orange: foodieIcon
+}
+
 function selectOption(optionId) {
   answers.value[currentQuestion.value.questionId] = optionId
+}
+
+function calculateResultCode() {
+  const scores = {
+    HEALING: 0,
+    EXPLORER: 0,
+    CULTURE: 0,
+    FOODIE: 0
+  }
+
+  travelQuestions.forEach(({ questionId }) => {
+    const optionId = answers.value[questionId]
+    if (!optionId) return
+
+    const letter = optionId.split('_')[1]?.charAt(0)
+    const typeCode = optionToType[letter]
+    if (typeCode) {
+      scores[typeCode] += 1
+    }
+  })
+
+  return Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0]
 }
 
 function goNext() {
   if (!selectedOptionId.value) return
   if (isLastQuestion.value) {
-    emit('complete', travelQuestions.map(({ questionId }) => ({ questionId, optionId: answers.value[questionId] })))
+    emit('complete', calculateResultCode())
     return
   }
   currentIndex.value += 1
@@ -69,7 +109,9 @@ onBeforeUnmount(() => {
           :aria-checked="selectedOptionId === option.optionId"
           @click="selectOption(option.optionId)"
         >
-          <span class="option-icon" :class="`tone-${option.tone}`" aria-hidden="true">{{ option.icon }}</span>
+          <span class="option-icon" :class="`tone-${option.tone}`" aria-hidden="true">
+            <img :src="optionIconSrc[option.tone]" :alt="option.text" />
+          </span>
           <span>{{ option.text }}</span>
           <span v-if="selectedOptionId === option.optionId" class="check" aria-hidden="true">✓</span>
         </button>
@@ -104,6 +146,11 @@ onBeforeUnmount(() => {
 .option-card:hover { transform: translateY(-2px); border-color: #7eae91; }
 .option-card.selected { background: #f7fbf7; border: 1.5px solid var(--green-900); box-shadow: 0 0 0 3px rgba(7,92,58,.06); }
 .option-icon { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 50%; font-size: 28px; }
+.option-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 .tone-green { background: #e5f3d9; } .tone-blue { background: #e7f1fb; } .tone-purple { background: #f1ebf6; } .tone-orange { background: #fff0dc; }
 .check { position: absolute; top: 10px; right: 12px; width: 22px; height: 22px; display: grid; place-items: center; color: #fff; background: var(--green-900); border-radius: 50%; font-size: 12px; }
 .modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 30px; }
