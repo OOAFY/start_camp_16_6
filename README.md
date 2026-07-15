@@ -91,3 +91,20 @@ For open source projects, say how it is licensed.
 
 ## Project status
 If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+# 로컬 개발 서버 실행
+
+프로젝트 루트에서 다음 PowerShell 스크립트를 실행하면 백엔드와 프론트엔드가 함께 시작됩니다.
+
+```powershell
+.\scripts\local-dev.ps1
+```
+
+- 프론트엔드: `http://localhost:5173/`
+- 백엔드 API 문서: `http://localhost:8000/docs`
+- 실행 로그: `.local/`
+
+두 서버를 종료하려면 다음 명령을 실행합니다.
+
+```powershell
+.\scripts\local-dev.ps1 -Stop
+```
