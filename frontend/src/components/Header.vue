@@ -56,8 +56,13 @@ const links = [
   letter-spacing: -1.1px;
 }
 .brand-logo {
-  width: 42px;
-  height: 42px;
+  display: block;
+  width: 42px !important;
+  min-width: 42px;
+  max-width: 42px;
+  height: 42px !important;
+  min-height: 42px;
+  max-height: 42px;
   flex-shrink: 0;
   object-fit: contain;
 }
@@ -116,7 +121,6 @@ const links = [
 
 @media (max-width: 560px) {
   .brand { font-size: 23px; }
-  .brand-logo { width: 36px; height: 36px; }
   .main-nav { gap: 18px; justify-content: flex-start; }
 }
 </style>
