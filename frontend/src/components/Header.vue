@@ -2,11 +2,8 @@
   <header class="site-header">
     <div class="container header-inner">
       <router-link class="brand" to="/" aria-label="LocalHub 홈">
-        <span class="brand-mark" aria-hidden="true">
-          <span class="pin-head"></span>
-          <span class="pin-shadow"></span>
-        </span>
-        <span>LocalHub</span>
+        <img :src="logo" alt="LocalHub 로고" class="brand-logo" />
+        <span class="brand-name">LocalHub</span>
       </router-link>
 
       <nav class="main-nav" aria-label="주요 메뉴">
@@ -25,6 +22,8 @@
 </template>
 
 <script setup>
+import logo from '../assets/logo.png'
+
 const links = [
   { label: '홈', to: '/' },
   { label: '지역 둘러보기', to: '/places' },
@@ -56,42 +55,13 @@ const links = [
   font-weight: 900;
   letter-spacing: -1.1px;
 }
-.brand-mark {
-  position: relative;
-  width: 34px;
+.brand-logo {
+  width: 42px;
   height: 42px;
-  display: inline-block;
+  flex-shrink: 0;
+  object-fit: contain;
 }
-.pin-head {
-  position: absolute;
-  top: 0;
-  left: 6px;
-  width: 22px;
-  height: 29px;
-  background: var(--green-800);
-  border-radius: 50% 50% 52% 52%;
-  clip-path: polygon(0 0, 100% 0, 92% 68%, 50% 100%, 8% 68%);
-}
-.pin-head::after {
-  content: '';
-  position: absolute;
-  top: 7px;
-  left: 7px;
-  width: 8px;
-  height: 8px;
-  background: #ffb75e;
-  border-radius: 50%;
-}
-.pin-shadow {
-  position: absolute;
-  left: 1px;
-  bottom: 1px;
-  width: 32px;
-  height: 9px;
-  background: #9dbb8b;
-  border-radius: 50%;
-  transform: scaleY(.55);
-}
+.brand-name { line-height: 1; }
 .main-nav {
   height: 100%;
   display: flex;
@@ -146,7 +116,7 @@ const links = [
 
 @media (max-width: 560px) {
   .brand { font-size: 23px; }
-  .brand-mark { width: 29px; height: 36px; transform: scale(.86); }
+  .brand-logo { width: 36px; height: 36px; }
   .main-nav { gap: 18px; justify-content: flex-start; }
 }
 </style>
