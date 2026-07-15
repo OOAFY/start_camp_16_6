@@ -4,11 +4,13 @@
     <main :class="{ 'app-main': route.path !== '/' }">
       <router-view />
     </main>
+    <ChatButton />
   </div>
 </template>
 
 <script setup>
 import { useRoute } from 'vue-router'
+import ChatButton from './components/ChatButton.vue'
 import Header from './components/Header.vue'
 
 const route = useRoute()

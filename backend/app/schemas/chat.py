@@ -16,7 +16,7 @@ class ChatRequest(CamelModel):
 
 
 class ChatReference(CamelModel):
-    type: Literal["place", "post"]
+    type: Literal["place", "post", "festival"]
     id: str
     title: str
 

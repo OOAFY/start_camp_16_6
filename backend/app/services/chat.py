@@ -9,6 +9,9 @@ from app.core.config import load_settings
 from app.core.exceptions import OpenAIServiceError
 from app.models.post import Post
 from app.schemas.chat import ChatData, ChatReference, ChatRequest
+from app.schemas.festival import Festival
+from app.services.festivals import list_festivals
+from data.place_loader import ALLOWED_REGIONS
 from data.place_loader import load_place_dataset
 
 SYSTEM_PROMPT = """당신은 구미·경북 지역 여행을 돕는 LocalHub 안내 챗봇입니다.
@@ -31,7 +34,41 @@ def _build_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def _build_context(places, posts) -> str:
+def _find_festivals(message: str) -> tuple[list[Festival], str | None]:
+    """질문 속 지역·연·월을 해석해 정제된 축제 일정에서 후보를 찾습니다."""
+    if "축제" not in message:
+        return [], None
+
+    region = next((value for value in ALLOWED_REGIONS if value in message), None)
+    year_match = re.search(r"(\d{4})\s*년", message)
+    month_match = re.search(r"(?<!\d)(1[0-2]|0?[1-9])\s*월", message)
+    year = int(year_match.group(1)) if year_match else None
+    month = int(month_match.group(1)) if month_match else None
+
+    def search(search_region: str | None) -> list[Festival]:
+        if year is not None:
+            return list_festivals(region=search_region, year=year, month=month)
+        results = list_festivals(region=search_region)
+        if month is not None:
+            results = [
+                festival for festival in results
+                if festival.start_date.month <= month <= festival.end_date.month
+            ]
+        return results
+
+    festivals = search(region)
+    if festivals or region is None or month is None:
+        return festivals[:5], None
+
+    alternatives = search(None)
+    notice = (
+        f"요청 조건과 정확히 일치하는 축제 없음: 지역={region}, 월={month}. "
+        "아래 축제는 같은 달의 다른 지원 지역 일정이므로 대안으로만 안내할 것."
+    )
+    return alternatives[:5], notice
+
+
+def _build_context(places, posts, festivals: list[Festival], festival_notice: str | None) -> str:
     place_lines = [
         f"- place: {place['title']} / {place['address']} / {', '.join(place.get('tags', []))}"
         for place in places
@@ -40,25 +77,37 @@ def _build_context(places, posts) -> str:
         f"- post: {post.title} / {post.content[:500]}"
         for post in posts
     ]
-    return "\n".join(place_lines + post_lines)
+    festival_lines = [
+        f"- festival: {festival.title} / {festival.region} / {festival.address} / "
+        f"{festival.start_date.isoformat()}~{festival.end_date.isoformat()}"
+        for festival in festivals
+    ]
+    notice_lines = [f"- festival_search_notice: {festival_notice}"] if festival_notice else []
+    return "\n".join(notice_lines + festival_lines + place_lines + post_lines)
 
 
 def create_grounded_answer(db: Session, payload: ChatRequest) -> ChatData:
     terms = _terms(payload.message)
     places = load_place_dataset()
+    festivals, festival_notice = _find_festivals(payload.message)
+    festival_ids = {festival.content_id for festival in festivals}
     matched_places = [place for place in places if any(
         term in " ".join([place.get("title", ""), place.get("address", ""), " ".join(place.get("tags", []))]).lower()
         for term in terms
-    )][:3]
+    ) and place.get("contentId") not in festival_ids][:3]
 
     posts: list[Post] = []
     if terms:
         conditions = [or_(Post.title.ilike(f"%{term}%"), Post.content.ilike(f"%{term}%")) for term in terms]
         posts = list(db.scalars(select(Post).where(or_(*conditions)).order_by(Post.id.desc()).limit(3)).all())
 
-    references = [ChatReference(type="place", id=place["contentId"], title=place["title"]) for place in matched_places]
+    references = [
+        ChatReference(type="festival", id=festival.content_id, title=festival.title)
+        for festival in festivals
+    ]
+    references += [ChatReference(type="place", id=place["contentId"], title=place["title"]) for place in matched_places]
     references += [ChatReference(type="post", id=str(post.id), title=post.title) for post in posts]
-    context = _build_context(matched_places, posts) or "검색된 참고 정보 없음"
+    context = _build_context(matched_places, posts, festivals, festival_notice) or "검색된 참고 정보 없음"
     messages = [
         {"role": item.role, "content": item.content}
         for item in payload.history[-10:]

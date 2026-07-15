@@ -92,8 +92,56 @@ def test_chat_calls_gpt_5_mini_with_place_references(monkeypatch) -> None:
         load_settings.cache_clear()
 
 
+def test_chat_finds_july_gumi_festivals_from_natural_language(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output_text="7월 구미 축제 안내",
+                status="completed",
+                incomplete_details=None,
+                usage=SimpleNamespace(
+                    output_tokens=20,
+                    output_tokens_details=SimpleNamespace(reasoning_tokens=5),
+                ),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str):
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(chat_service, "OpenAI", FakeOpenAI)
+    load_settings.cache_clear()
+
+    try:
+        with TestClient(create_app()) as client:
+            expected = client.get(
+                "/api/festivals",
+                params={"year": 2026, "month": 7},
+            ).json()["data"]
+            response = client.post(
+                "/api/chat",
+                json={"message": "7월에 있는 구미의 축제 몇 가지 알려줘", "history": []},
+            )
+
+        assert response.status_code == 200
+        references = response.json()["data"]["references"]
+        festival_ids = {item["id"] for item in references if item["type"] == "festival"}
+        assert festival_ids == {item["contentId"] for item in expected[:5]}
+        context = captured["input"][-1]["content"]
+        assert "정확히 일치하는 축제 없음: 지역=구미, 월=7" in context
+        assert "festival:" in context
+        assert all(item["title"] in context for item in expected[:5])
+    finally:
+        load_settings.cache_clear()
+
+
 def test_chat_returns_openai_api_error_without_api_key(monkeypatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # 로컬 .env가 있어도 빈 프로세스 환경변수가 우선하도록 테스트를 격리합니다.
+    monkeypatch.setenv("OPENAI_API_KEY", "")
     load_settings.cache_clear()
 
     try:

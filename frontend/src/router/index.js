@@ -13,6 +13,7 @@ const routes = [
   { path: '/places', name: 'Places', component: PlacesView },
   { path: '/community', name: 'Community', component: CommunityView },
   { path: '/community/write', name: 'CommunityWrite', component: CommunityWriteView },
+  { path: '/community/:id/edit', name: 'CommunityEdit', component: CommunityWriteView },
   { path: '/community/:id', name: 'CommunityDetail', component: CommunityDetailView },
   { path: '/travel-test', name: 'TravelTest', component: TravelTestView },
   { path: '/travel-result', name: 'TravelResult', component: TravelResultView },

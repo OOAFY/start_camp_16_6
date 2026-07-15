@@ -44,4 +44,16 @@ export function createPost(payload) {
   return api.post('/posts', payload).then(res => res.data.data)
 }
 
+export function updatePost(postId, payload) {
+  return api.put(`/posts/${postId}`, payload).then(res => res.data.data)
+}
+
+export function deletePost(postId, password) {
+  return api.delete(`/posts/${postId}`, { data: { password } }).then(res => res.data.data)
+}
+
+export function sendChat(message, history = []) {
+  return api.post('/chat', { message, history }).then(res => res.data.data)
+}
+
 export default api

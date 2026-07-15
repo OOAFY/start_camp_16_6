@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 
-import ChatButton from '../components/ChatButton.vue'
 import CommunityPanel from '../components/CommunityPanel.vue'
 import FestivalPanel from '../components/FestivalPanel.vue'
 import PlaceCard from '../components/PlaceCard.vue'
@@ -155,7 +154,6 @@ function previewType(code) {
     </main>
 
     <SiteFooter />
-    <ChatButton />
     <TravelTestModal v-if="showTravelTest" @complete="completeTravelTest" @skip="skipTravelTest" />
   </div>
 </template>
