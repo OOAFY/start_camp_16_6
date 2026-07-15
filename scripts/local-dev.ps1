@@ -12,32 +12,66 @@ $RuntimeDir = Join-Path $RepoRoot ".local"
 $BackendPidFile = Join-Path $RuntimeDir "backend.pid"
 $FrontendPidFile = Join-Path $RuntimeDir "frontend.pid"
 
+function Get-ListeningProcessIds {
+    param([int]$Port)
+
+    $Ids = @(
+        Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    )
+    if ($Ids) {
+        return $Ids
+    }
+
+    $Pattern = "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$"
+    return @(
+        & netstat.exe -ano -p TCP |
+            ForEach-Object { if ($_ -match $Pattern) { [int]$Matches[1] } } |
+            Sort-Object -Unique
+    )
+}
+
 function Stop-ManagedProcess {
     param(
         [string]$Name,
-        [string]$PidFile
+        [string]$PidFile,
+        [int]$Port
     )
 
-    if (-not (Test-Path -LiteralPath $PidFile)) {
-        Write-Host "$Name PID file was not found."
-        return
+    $ProcessIds = @()
+    if (Test-Path -LiteralPath $PidFile) {
+        $ProcessIds = @(Get-Content -LiteralPath $PidFile | ForEach-Object { [int]$_ })
+    } else {
+        # A healthy server may have been running before this script and reused.
+        $ProcessIds = @(Get-ListeningProcessIds -Port $Port)
     }
 
-    $ProcessId = [int](Get-Content -LiteralPath $PidFile -Raw)
-    $Process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if ($null -ne $Process) {
-        # Stop child processes created by the development server as well.
-        & taskkill.exe /PID $ProcessId /T /F | Out-Null
-        Write-Host "$Name server stopped. (PID: $ProcessId)"
-    } else {
+    if (-not $ProcessIds) {
         Write-Host "$Name server is already stopped."
     }
-    Remove-Item -LiteralPath $PidFile -Force
+
+    foreach ($ProcessId in $ProcessIds) {
+        # Stop child processes created by the development server as well.
+        $PreviousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $TaskkillOutput = & taskkill.exe /PID $ProcessId /T /F 2>&1
+        $TaskkillExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $PreviousErrorActionPreference
+        if ($TaskkillExitCode -eq 0) {
+            Write-Host "$Name server stopped. (PID: $ProcessId)"
+        } else {
+            Write-Warning "$Name PID $ProcessId could not be stopped: $TaskkillOutput"
+        }
+    }
+
+    if (Test-Path -LiteralPath $PidFile) {
+        Remove-Item -LiteralPath $PidFile -Force
+    }
 }
 
 if ($Stop) {
-    Stop-ManagedProcess -Name "frontend" -PidFile $FrontendPidFile
-    Stop-ManagedProcess -Name "backend" -PidFile $BackendPidFile
+    Stop-ManagedProcess -Name "frontend" -PidFile $FrontendPidFile -Port 5173
+    Stop-ManagedProcess -Name "backend" -PidFile $BackendPidFile -Port 8000
     exit 0
 }
 
@@ -86,8 +120,12 @@ $FrontendUrl = "http://localhost:5173/"
 
 if (Test-Url $BackendUrl) {
     Write-Host "backend is already running and will be reused."
+    $BackendProcessIds = @(Get-ListeningProcessIds -Port 8000)
+    if ($BackendProcessIds) {
+        $BackendProcessIds | Set-Content -LiteralPath $BackendPidFile
+    }
 } else {
-    if (Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue) {
+    if (Get-ListeningProcessIds -Port 8000) {
         throw "Port 8000 is occupied by a non-LocalHub server."
     }
 
@@ -105,8 +143,12 @@ if (Test-Url $BackendUrl) {
 
 if (Test-Url $FrontendUrl) {
     Write-Host "frontend is already running and will be reused."
+    $FrontendProcessIds = @(Get-ListeningProcessIds -Port 5173)
+    if ($FrontendProcessIds) {
+        $FrontendProcessIds | Set-Content -LiteralPath $FrontendPidFile
+    }
 } else {
-    if (Get-NetTCPConnection -State Listen -LocalPort 5173 -ErrorAction SilentlyContinue) {
+    if (Get-ListeningProcessIds -Port 5173) {
         throw "Port 5173 is occupied by a non-LocalHub server."
     }
 

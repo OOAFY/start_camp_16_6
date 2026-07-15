@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 import sys
 
@@ -135,6 +136,64 @@ def test_chat_finds_july_gumi_festivals_from_natural_language(monkeypatch) -> No
         assert "정확히 일치하는 축제 없음: 지역=구미, 월=7" in context
         assert "festival:" in context
         assert all(item["title"] in context for item in expected[:5])
+    finally:
+        load_settings.cache_clear()
+
+
+def test_chat_finds_nearest_upcoming_festival_from_today(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output_text="가장 가까운 축제 안내",
+                status="completed",
+                incomplete_details=None,
+                usage=SimpleNamespace(
+                    output_tokens=20,
+                    output_tokens_details=SimpleNamespace(reasoning_tokens=5),
+                ),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str):
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(chat_service, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(chat_service, "_today", lambda: date(2026, 7, 15))
+    load_settings.cache_clear()
+
+    try:
+        with TestClient(create_app()) as client:
+            festivals = client.get("/api/festivals").json()["data"]
+            expected = min(
+                (item for item in festivals if item["endDate"] >= "2026-07-15"),
+                key=lambda item: (max(item["startDate"], "2026-07-15"), item["endDate"], item["contentId"]),
+            )
+            response = client.post(
+                "/api/chat",
+                json={
+                    "message": "지금 날짜 기준으로 가장 가까운 시일 내에 있는 축제 하나를 추천해줘",
+                    "history": [],
+                },
+            )
+
+        assert response.status_code == 200
+        festival_references = [
+            item for item in response.json()["data"]["references"]
+            if item["type"] == "festival"
+        ]
+        assert festival_references == [{
+            "type": "festival",
+            "id": expected["contentId"],
+            "title": expected["title"],
+        }]
+        context = captured["input"][-1]["content"]
+        assert "기준일=2026-07-15" in context
+        assert expected["startDate"] in context
+        assert expected["endDate"] in context
     finally:
         load_settings.cache_clear()
 

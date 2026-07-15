@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import date
 
 from openai import OpenAI, OpenAIError
 from sqlalchemy import or_, select
@@ -34,6 +35,10 @@ def _build_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
+def _today() -> date:
+    return date.today()
+
+
 def _find_festivals(message: str) -> tuple[list[Festival], str | None]:
     """질문 속 지역·연·월을 해석해 정제된 축제 일정에서 후보를 찾습니다."""
     if "축제" not in message:
@@ -44,6 +49,11 @@ def _find_festivals(message: str) -> tuple[list[Festival], str | None]:
     month_match = re.search(r"(?<!\d)(1[0-2]|0?[1-9])\s*월", message)
     year = int(year_match.group(1)) if year_match else None
     month = int(month_match.group(1)) if month_match else None
+    upcoming_intent = any(phrase in message for phrase in (
+        "가장 가까운", "가까운 시일", "다가오는", "다음 축제",
+        "예정된 축제", "지금 날짜", "현재 기준", "오늘 기준",
+    ))
+    requested_count = 1 if re.search(r"(?:하나|한\s*개|1\s*개)", message) else 5
 
     def search(search_region: str | None) -> list[Festival]:
         if year is not None:
@@ -57,15 +67,25 @@ def _find_festivals(message: str) -> tuple[list[Festival], str | None]:
         return results
 
     festivals = search(region)
+    if upcoming_intent and year is None and month is None:
+        today = _today()
+        festivals = [festival for festival in festivals if festival.end_date >= today]
+        festivals.sort(key=lambda festival: (max(festival.start_date, today), festival.end_date, festival.content_id))
+        notice = (
+            f"기준일={today.isoformat()}. 기준일에 진행 중이거나 이후에 시작하는 축제를 대상으로 "
+            "가장 가까운 일정 순으로 정렬했음."
+        )
+        return festivals[:requested_count], notice
+
     if festivals or region is None or month is None:
-        return festivals[:5], None
+        return festivals[:requested_count], None
 
     alternatives = search(None)
     notice = (
         f"요청 조건과 정확히 일치하는 축제 없음: 지역={region}, 월={month}. "
         "아래 축제는 같은 달의 다른 지원 지역 일정이므로 대안으로만 안내할 것."
     )
-    return alternatives[:5], notice
+    return alternatives[:requested_count], notice
 
 
 def _build_context(places, posts, festivals: list[Festival], festival_notice: str | None) -> str:
