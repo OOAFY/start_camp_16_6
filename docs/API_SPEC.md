@@ -403,8 +403,8 @@ Response item:
   "longitude": 128.331422,
   "latitude": 36.129404,
   "imageUrl": "https://tong.visitkorea.or.kr/example.jpg",
-  "startDate": "2026-11-07",
-  "endDate": "2026-11-09"
+  "eventStartDate": "2026-10-09",
+  "eventEndDate": "2026-10-10"
 }
 ```
 

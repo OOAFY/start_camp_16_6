@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat_router, health_router, places_router, posts_router, travel_test_router
+from app.api import chat_router, festivals_router, health_router, places_router, posts_router, travel_test_router
 from app.core.config import load_settings
 from app.core.exceptions import register_exception_handlers
 from app.db.base import Base
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(places_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     app.include_router(travel_test_router, prefix="/api")
+    app.include_router(festivals_router, prefix="/api")
     return app
 
 

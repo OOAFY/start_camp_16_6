@@ -3,6 +3,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
+class OpenAIServiceError(Exception):
+    """OpenAI API를 호출하거나 응답을 처리하지 못했을 때 발생합니다."""
+
+
 def _build_error_response(status_code: int, code: str, detail: str) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
@@ -16,6 +20,10 @@ def _build_error_response(status_code: int, code: str, detail: str) -> JSONRespo
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(OpenAIServiceError)
+    async def openai_exception_handler(_: Request, exc: OpenAIServiceError) -> JSONResponse:
+        return _build_error_response(500, "OPENAI_API_ERROR", str(exc))
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         detail = "; ".join(error.get("msg", "입력값이 올바르지 않습니다.") for error in exc.errors())

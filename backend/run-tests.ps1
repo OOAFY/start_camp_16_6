@@ -36,6 +36,7 @@ Invoke-TestCommand -Name "db session tests" -CommandArgs @("-m", "pytest", "test
 Invoke-TestCommand -Name "health tests" -CommandArgs @("-m", "pytest", "tests/test_health.py")
 Invoke-TestCommand -Name "post tests" -CommandArgs @("-m", "pytest", "tests/test_posts.py")
 Invoke-TestCommand -Name "integration API tests" -CommandArgs @("-m", "pytest", "tests/test_integration_apis.py")
+Invoke-TestCommand -Name "festival API tests" -CommandArgs @("-m", "pytest", "tests/test_festivals.py")
 
 Write-Host ""
 Write-Host "All backend tests passed." -ForegroundColor Green

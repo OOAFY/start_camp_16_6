@@ -25,6 +25,7 @@ def _load_raw_files() -> List[Dict[str, Any]]:
         raise FileNotFoundError("No raw JSON files found under data/raw")
 
     combined: List[Dict[str, Any]] = []
+    seen_content_ids: set[str] = set()
     for path in files:
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -36,6 +37,11 @@ def _load_raw_files() -> List[Dict[str, Any]]:
         for item in items:
             if not isinstance(item, dict):
                 continue
+            content_id = str(item.get("contentid") or "")
+            if content_id and content_id in seen_content_ids:
+                continue
+            if content_id:
+                seen_content_ids.add(content_id)
             combined.append({
                 "sourceFile": path.name,
                 "contentType": payload.get("contentType") or item.get("contenttypeid") or "",

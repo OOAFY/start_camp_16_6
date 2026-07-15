@@ -33,4 +33,5 @@ def load_settings() -> dict[str, object]:
         "database_url": os.getenv("DATABASE_URL", "sqlite:///./localhub.db"),
         "cors_origins": origins,
         "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
+        "openai_model": os.getenv("OPENAI_MODEL", "gpt-5-mini"),
     }

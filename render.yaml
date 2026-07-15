@@ -11,6 +11,8 @@ services:
       - key: DATABASE_URL
         value: sqlite:///./localhub.db
       - key: CORS_ORIGINS
-        sync: https://cosmic-clafoutis-8894bf.netlify.app,http://localhost:5173
+        value: https://cosmic-clafoutis-8894bf.netlify.app,http://localhost:5173
       - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5-mini
