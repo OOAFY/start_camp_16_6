@@ -44,8 +44,9 @@
             type="button"
             @click="openPlace(place)"
           >
-            <img v-if="place.thumbnailUrl || place.imageUrl" :src="place.thumbnailUrl || place.imageUrl" :alt="place.title" />
-            <div v-else class="image-placeholder">LOCAL PLACE</div>
+            <!-- imageUrl 우선 사용, 없으면 thumbnailUrl, 둘 다 없으면 placeholder -->
+            <img v-if="place.imageUrl || place.thumbnailUrl" :src="place.imageUrl || place.thumbnailUrl" :alt="place.title" />
+            <div v-else class="image-placeholder">GUMI · GYEONGBUK LOCAL PLACE</div>
             <span class="recommend-overlay"><small>{{ place.region || place.contentType }}</small><strong>{{ place.title }}</strong></span>
           </button>
         </div>
@@ -83,7 +84,9 @@
         <article v-for="place in filteredPlaces" :key="place.contentId" class="place-card">
           <button type="button" class="place-button" @click="openPlace(place)">
             <div class="image-wrap">
-              <img :src="place.thumbnailUrl || place.imageUrl" :alt="place.title" />
+              <!-- imageUrl 우선 사용, 없으면 thumbnailUrl, 둘 다 없으면 placeholder -->
+              <img v-if="place.imageUrl || place.thumbnailUrl" :src="place.imageUrl || place.thumbnailUrl" :alt="place.title" />
+              <div v-else class="image-placeholder">GUMI · GYEONGBUK LOCAL PLACE</div>
               <span class="category">{{ place.contentType }}</span>
               <span class="match">{{ place.tags.slice(0, 2).join(' · ') }}</span>
             </div>
@@ -692,6 +695,21 @@ watch(
   border-radius: 20px;
   border: 1px solid var(--line);
 }
+
+.image-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: linear-gradient(135deg, #b9d4c3, #6c9f7f);
+  color: rgba(255, 255, 255, 0.85); /* 추가: 텍스트 색상 */
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-align: center; /* 추가: 텍스트 중앙 정렬 */
+  padding: 10px; /* 추가: 여백 */
+}
+
 .empty-state h3 { color: var(--navy); margin-bottom: 8px; }
 .empty-state p { color: #5d665e; font-size: 14px; }
 
