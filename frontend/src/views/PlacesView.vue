@@ -44,8 +44,9 @@
             type="button"
             @click="openPlace(place)"
           >
-            <img v-if="place.thumbnailUrl || place.imageUrl" :src="place.thumbnailUrl || place.imageUrl" :alt="place.title" />
-            <div v-else class="image-placeholder">LOCAL PLACE</div>
+            <!-- imageUrl 우선 사용, 없으면 thumbnailUrl, 둘 다 없으면 placeholder -->
+            <img v-if="place.imageUrl || place.thumbnailUrl" :src="place.imageUrl || place.thumbnailUrl" :alt="place.title" />
+            <div v-else class="image-placeholder">GUMI · GYEONGBUK LOCAL PLACE</div>
             <span class="recommend-overlay"><small>{{ place.region || place.contentType }}</small><strong>{{ place.title }}</strong></span>
           </button>
         </div>
@@ -78,31 +79,47 @@
       </div>
     </div>
 
-    <div v-if="filteredPlaces.length" class="place-grid">
-      <article v-for="place in filteredPlaces" :key="place.contentId" class="place-card">
-        <button type="button" class="place-button" @click="openPlace(place)">
-          <div class="image-wrap">
-            <img :src="place.thumbnailUrl || place.imageUrl" :alt="place.title" />
-            <span class="category">{{ place.contentType }}</span>
-            <span class="match">{{ place.tags.slice(0, 2).join(' · ') }}</span>
-          </div>
+    <template v-if="filteredPlaces.length">
+      <div class="place-grid">
+        <article v-for="place in filteredPlaces" :key="place.contentId" class="place-card">
+          <button type="button" class="place-button" @click="openPlace(place)">
+            <div class="image-wrap">
+              <!-- imageUrl 우선 사용, 없으면 thumbnailUrl, 둘 다 없으면 placeholder -->
+              <img v-if="place.imageUrl || place.thumbnailUrl" :src="place.imageUrl || place.thumbnailUrl" :alt="place.title" />
+              <div v-else class="image-placeholder">GUMI · GYEONGBUK LOCAL PLACE</div>
+              <span class="category">{{ place.contentType }}</span>
+              <span class="match">{{ place.tags.slice(0, 2).join(' · ') }}</span>
+            </div>
 
-          <div class="place-copy">
-            <div class="place-meta">
-              <span class="region">{{ place.region }}</span>
-              <span class="type">{{ place.contentType }}</span>
+            <div class="place-copy">
+              <div class="place-meta">
+                <span class="region">{{ place.region }}</span>
+                <span class="type">{{ place.contentType }}</span>
+              </div>
+              <h3>{{ place.title }}</h3>
+              <p>{{ place.address }}</p>
+              <div class="tag-list">
+                <span v-for="tag in place.tags" :key="tag">{{ tag }}</span>
+              </div>
             </div>
-            <h3>{{ place.title }}</h3>
-            <p>{{ place.address }}</p>
-            <div class="tag-list">
-              <span v-for="tag in place.tags" :key="tag">{{ tag }}</span>
-            </div>
-          </div>
+          </button>
+        </article>
+      </div>
+
+      <!-- 페이지네이션(더보기) 버튼 영역 추가 -->
+      <div v-if="currentPage < totalPages" class="pagination-action">
+        <button 
+          type="button" 
+          class="load-more-btn" 
+          @click="loadMore" 
+          :disabled="isLoading"
+        >
+          {{ isLoading ? '장소 불러오는 중...' : '더보기' }}
         </button>
-      </article>
-    </div>
+      </div>
+    </template>
 
-    <div v-else class="empty-state">
+    <div v-else-if="!isLoading" class="empty-state">
       <h3>조건에 맞는 장소가 없어요</h3>
       <p>검색어 또는 필터를 바꿔서 다시 찾아보세요.</p>
     </div>
@@ -132,6 +149,11 @@ const selectedTag = ref('')
 const RESULT_KEY = 'localhub-travel-type'
 const preferenceCode = ref('')
 const randomOrder = ref([])
+
+// 페이징 처리를 위한 상태 추가
+const currentPage = ref(1)
+const totalPages = ref(1)
+const isLoading = ref(false)
 
 const preferenceProfiles = {
   HEALING: { name: '고요한 쉼표 수집가', tags: ['힐링', '자연', '산책', '휴식', '조용함', '공원'] },
@@ -194,7 +216,6 @@ const recommendedPlaces = computed(() => {
   const exactRecommendations = sortByPreference(exactMatches)
   if (exactRecommendations.length >= 2) return exactRecommendations.slice(0, 2)
 
-  // 정확히 일치하는 장소가 하나뿐이면 중복 카드 대신 취향이 가까운 장소로 빈자리를 채웁니다.
   const exactIds = new Set(exactRecommendations.map((place) => place.contentId))
   const relatedRecommendations = sortByPreference(places.value.filter((place) => !exactIds.has(place.contentId)))
   return [...exactRecommendations, ...relatedRecommendations].slice(0, 2)
@@ -213,20 +234,52 @@ const filteredPlaces = computed(() => {
   })
 })
 
-async function loadPlaces() {
+// isLoadMore 플래그를 통해 덮어쓸지, 배열에 누적할지 결정합니다.
+async function loadPlaces(isLoadMore = false) {
+  if (isLoading.value) return
+  isLoading.value = true
+
   try {
+    if (!isLoadMore) {
+      currentPage.value = 1
+    }
+
     const res = await fetchPlaces({
-      size: 100,
+      page: currentPage.value,
+      size: 30, // 페이지 당 불러올 아이템 수 (원하는 숫자로 조절 가능)
       type: selectedType.value === 'all' ? undefined : selectedType.value,
       keyword: searchText.value || undefined
     })
 
-    const payload = res?.items || res || []
-    places.value = Array.isArray(payload) ? payload.map(normalizePlace) : []
-    randomOrder.value = [...places.value.map((place) => place.contentId), ...allTags.value].sort(() => Math.random() - 0.5)
-    selectedTag.value = featuredTags.value[0] || ''
+    // API 응답 구조 대응
+    const payload = res?.data?.items || res?.items || res || []
+    const newPlaces = Array.isArray(payload) ? payload.map(normalizePlace) : []
+
+    if (isLoadMore) {
+      places.value.push(...newPlaces)
+    } else {
+      places.value = newPlaces
+    }
+
+    // 전체 페이지 수 갱신
+    totalPages.value = res?.data?.totalPages ?? res?.totalPages ?? 1
+
+    if (!isLoadMore) {
+      randomOrder.value = [...places.value.map((place) => place.contentId), ...allTags.value].sort(() => Math.random() - 0.5)
+      selectedTag.value = featuredTags.value[0] || ''
+    }
   } catch (error) {
-    places.value = []
+    if (!isLoadMore) places.value = []
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 다음 페이지 데이터를 요청하는 함수
+function loadMore() {
+  if (currentPage.value < totalPages.value) {
+    currentPage.value++
+    loadPlaces(true)
   }
 }
 
@@ -235,8 +288,9 @@ onMounted(() => {
   loadPlaces()
 })
 
+// 검색어나 필터가 변경되면 1페이지부터 다시 불러옵니다.
 watch([selectedType, searchText], () => {
-  loadPlaces()
+  loadPlaces(false)
 })
 
 async function openPlace(place) {
@@ -256,7 +310,6 @@ watch(
     if (!selectedId) return
 
     const place = places.value.find((item) => item.contentId === selectedId)
-    // 홈 추천에서 바로 진입할 때 목록 로딩 전이어도 상세 API를 호출합니다.
     openPlace(place || { contentId: String(selectedId) })
   },
   { immediate: true }
@@ -610,27 +663,64 @@ watch(
   color: var(--green-900);
   font-size: 11px;
 }
+.pagination-action {
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+}
+.load-more-btn {
+  padding: 15px 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--navy);
+  font-size: 14px;
+  font-weight: 750;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.04);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.load-more-btn:hover:not(:disabled) {
+  background: #f4f7f4;
+  border-color: #a8cbb4;
+}
+.load-more-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  background: #fff;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+}
+
+.image-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: linear-gradient(135deg, #b9d4c3, #6c9f7f);
+  color: rgba(255, 255, 255, 0.85); /* 추가: 텍스트 색상 */
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-align: center; /* 추가: 텍스트 중앙 정렬 */
+  padding: 10px; /* 추가: 여백 */
+}
+
+.empty-state h3 { color: var(--navy); margin-bottom: 8px; }
+.empty-state p { color: #5d665e; font-size: 14px; }
 
 @media (max-width: 800px) {
-  .page-hero, .place-grid {
-    grid-template-columns: 1fr;
-  }
-  .page-copy, .hero-side-card {
-    padding: 20px;
-  }
-  .hero-summary {
-    margin-top: 24px;
-  }
+  .page-hero, .place-grid { grid-template-columns: 1fr; }
+  .page-copy, .hero-side-card { padding: 20px; }
+  .hero-summary { margin-top: 24px; }
 }
 @media (max-width: 480px) {
-  .recommend-grid {
-    grid-template-columns: 1fr;
-  }
-  .recommend-card {
-    height: 150px;
-  }
-  .hero-summary {
-    gap: 14px;
-  }
+  .recommend-grid { grid-template-columns: 1fr; }
+  .recommend-card { height: 150px; }
+  .hero-summary { gap: 14px; }
 }
 </style>
