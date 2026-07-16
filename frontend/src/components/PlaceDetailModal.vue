@@ -43,6 +43,14 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+const PLACE_MARKER_ICON = L.divIcon({
+  className: 'localhub-place-marker',
+  html: '<span aria-hidden="true"></span>',
+  iconSize: [30, 38],
+  iconAnchor: [15, 38],
+  popupAnchor: [0, -34]
+})
+
 const props = defineProps({
   show: { type: Boolean, default: false },
   place: { type: Object, default: null }
@@ -89,7 +97,7 @@ function initMap() {
       attribution: '&copy; OpenStreetMap'
     }).addTo(map)
 
-    marker = L.marker(position).addTo(map)
+    marker = L.marker(position, { icon: PLACE_MARKER_ICON }).addTo(map)
   }
 
   // 모달 애니메이션 및 렌더링 이후 지도 크기를 재계산하여 회색 타일 오류 방지
@@ -221,7 +229,31 @@ onBeforeUnmount(() => {
   border: 1px solid #edf0ed;
   z-index: 1; /* 모달 닫기 버튼을 덮지 않도록 제어 */
 }
-
+:deep(.localhub-place-marker) {
+  border: 0;
+  background: transparent;
+}
+:deep(.localhub-place-marker span) {
+  position: relative;
+  display: block;
+  width: 30px;
+  height: 30px;
+  border: 3px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  background: var(--green-800);
+  box-shadow: 0 5px 14px rgba(16, 67, 45, .35);
+  transform: rotate(-45deg);
+}
+:deep(.localhub-place-marker span::after) {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  content: '';
+}
 @media (max-width: 430px) {
   .overlay { padding: 12px; }
   .detail-image { height: 190px; }
