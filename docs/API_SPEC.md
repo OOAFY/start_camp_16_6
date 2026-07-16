@@ -265,6 +265,7 @@ Request:
 ```json
 {
   "message": "구미에서 산책하기 좋은 관광지를 추천해줘",
+  "travelType": "HEALING",
   "history": [
     { "role": "user", "content": "구미 여행 정보를 알려줘" },
     { "role": "assistant", "content": "어떤 종류의 장소를 찾고 계신가요?" }
@@ -272,7 +273,7 @@ Request:
 }
 ```
 
-Allowed roles: `user`, `assistant`.
+Allowed roles: `user`, `assistant`. `travelType` is optional and accepts `HEALING`, `EXPLORER`, `CULTURE`, or `FOODIE`.
 
 Response:
 
@@ -294,11 +295,15 @@ Chat grounding rules:
 
 1. Search provided JSON and posts before calling OpenAI.
 2. Community questions infer post category and expand common travel expressions such as family, food, date, walking, weekend, review, and festival.
-3. Recommendation questions prioritize `recommendationCount`; recent/latest questions prioritize `createdAt`.
+3. Recommendation-count ranking questions (for example, `가장 추천 수가 높은 게시글`) search all posts, prioritize `recommendationCount`, and provide only the top post; recent/latest questions prioritize `createdAt`.
 4. Send only relevant records as context, including post category, recommendation count, creation time, title, and content.
 5. Never claim unavailable prices, schedules, reviews, or facilities.
 6. Return every used place/post in `references`; post references open `/community/{id}` in the frontend.
-7. OpenAI failure returns `500 / OPENAI_API_ERROR` with no fabricated answer.
+7. Map-intent questions return `map` references that open `/map?selected={contentId}` and focus the selected coordinates.
+8. Calendar-intent questions return `festival_calendar` references (`id: YYYY-MM`) that open the requested month. Festival references focus the event month and open its detail modal.
+9. When `travelType` is provided, places matching that type's derived keywords and tags are ranked first among candidates satisfying the explicit question conditions. The preference code, keywords, and matched tags are included in the grounded context.
+10. For generic travel recommendations without `travelType`, tourism, cultural, and leisure records are preferred so unrelated large retail stores do not occupy the recommendation list.
+11. OpenAI failure returns `500 / OPENAI_API_ERROR` with no fabricated answer.
 
 ## 6. Travel test API
 

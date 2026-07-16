@@ -65,7 +65,7 @@
 
       <div v-if="isLoading" class="status-card">축제 정보를 불러오는 중입니다...</div>
       <div v-else-if="errorMessage" class="status-card error">{{ errorMessage }}</div>
-      <FullCalendar v-else :options="calendarOptions" />
+      <FullCalendar v-else ref="calendarComponent" :options="calendarOptions" />
     </div>
 
     <div class="list-heading">
@@ -132,16 +132,20 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import FullCalendar from '@fullcalendar/vue3'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import { fetchFestivals } from '../api'
+
+const route = useRoute()
 
 const festivals = ref([])
 const isLoading = ref(false)
 const errorMessage = ref('')
 const visibleMonthStart = ref(startOfMonth(new Date()))
 const selectedFestival = ref(null)
+const calendarComponent = ref(null)
 
 function normalizeDate(value) {
   if (!value) return null
@@ -299,6 +303,26 @@ function closeFestivalDetail() {
   document.body.style.overflow = ''
 }
 
+async function applyChatRoute() {
+  await nextTick()
+  const calendarApi = calendarComponent.value?.getApi?.()
+  const selectedId = String(route.query.selected || '')
+  const selected = festivals.value.find((festival) => getFestivalId(festival) === selectedId)
+
+  if (selected) {
+    const start = getFestivalStart(selected)
+    if (start) calendarApi?.gotoDate(start)
+    openFestivalDetail(selected)
+    return
+  }
+
+  const year = Number(route.query.year)
+  const month = Number(route.query.month)
+  if (Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12) {
+    calendarApi?.gotoDate(`${year}-${String(month).padStart(2, '0')}-01`)
+  }
+}
+
 function handleKeydown(event) {
   if (event.key === 'Escape' && selectedFestival.value) closeFestivalDetail()
 }
@@ -330,8 +354,14 @@ onMounted(async () => {
     errorMessage.value = err?.message || '축제 정보를 불러오지 못했습니다.'
   } finally {
     isLoading.value = false
+    if (!errorMessage.value) await applyChatRoute()
   }
 })
+
+watch(
+  () => [route.query.selected, route.query.year, route.query.month],
+  () => applyChatRoute()
+)
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)

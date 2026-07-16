@@ -231,7 +231,7 @@ async function loadPlaces() {
 }
 
 onMounted(() => {
-  preferenceCode.value = sessionStorage.getItem(RESULT_KEY) || ''
+  preferenceCode.value = sessionStorage.getItem(RESULT_KEY) || localStorage.getItem(RESULT_KEY) || ''
   loadPlaces()
 })
 

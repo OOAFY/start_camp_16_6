@@ -60,8 +60,8 @@ export function deletePost(postId, password) {
   return api.delete(`/posts/${postId}`, { data: { password } }).then(res => res.data.data)
 }
 
-export function sendChat(message, history = []) {
-  return api.post('/chat', { message, history }).then(res => res.data.data)
+export function sendChat(message, history = [], travelType = null) {
+  return api.post('/chat', { message, history, travelType }).then(res => res.data.data)
 }
 
 export default api

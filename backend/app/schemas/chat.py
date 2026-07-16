@@ -13,10 +13,11 @@ class ChatHistoryItem(CamelModel):
 class ChatRequest(CamelModel):
     message: str = Field(min_length=1)
     history: list[ChatHistoryItem] = Field(default_factory=list)
+    travel_type: Literal["HEALING", "EXPLORER", "CULTURE", "FOODIE"] | None = None
 
 
 class ChatReference(CamelModel):
-    type: Literal["place", "post", "festival"]
+    type: Literal["place", "map", "post", "festival", "festival_calendar"]
     id: str
     title: str
 

@@ -3,6 +3,8 @@ import { nextTick, ref } from 'vue'
 
 import { sendChat } from '../api'
 
+const TRAVEL_TYPE_KEY = 'localhub-travel-type'
+
 const isOpen = ref(false)
 const input = ref('')
 const isSending = ref(false)
@@ -26,8 +28,15 @@ function scrollToBottom() {
 }
 
 function referenceLink(reference) {
+  if (reference.type === 'map') {
+    return { path: '/map', query: { selected: reference.id } }
+  }
   if (reference.type === 'place') {
     return { path: '/places', query: { selected: reference.id } }
+  }
+  if (reference.type === 'festival_calendar') {
+    const [year, month] = String(reference.id).split('-')
+    return { path: '/festivals', query: { year, month } }
   }
   if (reference.type === 'festival') {
     return { path: '/festivals', query: { selected: reference.id } }
@@ -51,7 +60,8 @@ async function submitMessage() {
   scrollToBottom()
 
   try {
-    const data = await sendChat(content, history)
+    const travelType = sessionStorage.getItem(TRAVEL_TYPE_KEY) || localStorage.getItem(TRAVEL_TYPE_KEY) || null
+    const data = await sendChat(content, history, travelType)
     messages.value.push({
       role: 'assistant',
       content: data.answer,
@@ -97,7 +107,7 @@ async function submitMessage() {
             :to="referenceLink(reference)"
             @click="isOpen = false"
           >
-            {{ reference.title }} →
+            {{ reference.title }}{{ reference.type === 'map' ? ' 지도에서 보기' : reference.type === 'festival_calendar' ? ' 열기' : '' }} →
           </router-link>
         </nav>
       </article>

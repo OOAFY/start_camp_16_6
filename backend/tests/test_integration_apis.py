@@ -93,6 +93,97 @@ def test_chat_calls_gpt_5_mini_with_place_references(monkeypatch) -> None:
         load_settings.cache_clear()
 
 
+def test_chat_prioritizes_places_matching_the_saved_travel_type(monkeypatch) -> None:
+    captured_contexts: list[str] = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured_contexts.append(kwargs["input"][-1]["content"])
+            return SimpleNamespace(
+                output_text="여행 성향 태그를 반영한 추천입니다.",
+                status="completed",
+                incomplete_details=None,
+                usage=SimpleNamespace(
+                    output_tokens=20,
+                    output_tokens_details=SimpleNamespace(reasoning_tokens=5),
+                ),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str):
+            self.responses = FakeResponses()
+
+    places = [
+        {
+            "contentId": "healing-place",
+            "title": "조용한 생태공원",
+            "address": "경상북도 구미시 산책로 1",
+            "region": "구미",
+            "contentType": "관광지",
+            "tags": ["자연", "산책", "휴식"],
+        },
+        {
+            "contentId": "foodie-place",
+            "title": "구미 전통시장",
+            "address": "경상북도 구미시 시장로 2",
+            "region": "구미",
+            "contentType": "음식점",
+            "tags": ["음식점", "시장", "특산물"],
+        },
+        {
+            "contentId": "shopping-place",
+            "title": "구미 대형마트",
+            "address": "경상북도 구미시 구미대로 3",
+            "region": "구미",
+            "contentType": "쇼핑",
+            "tags": ["쇼핑", "대형마트"],
+        },
+    ]
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(chat_service, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(chat_service, "load_place_dataset", lambda: places)
+    load_settings.cache_clear()
+
+    try:
+        with TestClient(create_app()) as client:
+            foodie_response = client.post("/api/chat", json={
+                "message": "나한테 좋을만한 구미 여행지 추천해줘",
+                "history": [],
+                "travelType": "FOODIE",
+            })
+            healing_response = client.post("/api/chat", json={
+                "message": "나한테 좋을만한 구미 여행지 추천해줘",
+                "history": [],
+                "travelType": "HEALING",
+            })
+            no_preference_response = client.post("/api/chat", json={
+                "message": "나한테 좋을만한 구미 여행지 추천해줘",
+                "history": [],
+            })
+            invalid_response = client.post("/api/chat", json={
+                "message": "구미 여행지를 추천해줘",
+                "history": [],
+                "travelType": "UNKNOWN",
+            })
+
+        foodie_places = [item for item in foodie_response.json()["data"]["references"] if item["type"] == "place"]
+        healing_places = [item for item in healing_response.json()["data"]["references"] if item["type"] == "place"]
+        no_preference_places = [
+            item for item in no_preference_response.json()["data"]["references"] if item["type"] == "place"
+        ]
+        assert foodie_places[0]["id"] == "foodie-place"
+        assert healing_places[0]["id"] == "healing-place"
+        assert no_preference_places[0]["id"] == "healing-place"
+        assert all(item["id"] != "shopping-place" for item in no_preference_places)
+        assert "travel_preference: code=FOODIE" in captured_contexts[0]
+        assert "preference_matches=음식점, 시장, 특산물" in captured_contexts[0]
+        assert "travel_preference: code=HEALING" in captured_contexts[1]
+        assert invalid_response.status_code == 422
+    finally:
+        load_settings.cache_clear()
+
+
 def test_chat_finds_july_gumi_festivals_from_natural_language(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -198,6 +289,62 @@ def test_chat_finds_nearest_upcoming_festival_from_today(monkeypatch) -> None:
         load_settings.cache_clear()
 
 
+def test_chat_creates_map_and_festival_calendar_navigation_references(monkeypatch) -> None:
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                output_text="관련 화면 링크를 함께 안내했습니다.",
+                status="completed",
+                incomplete_details=None,
+                usage=SimpleNamespace(
+                    output_tokens=20,
+                    output_tokens_details=SimpleNamespace(reasoning_tokens=5),
+                ),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str):
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(chat_service, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(chat_service, "_today", lambda: date(2026, 7, 16))
+    load_settings.cache_clear()
+
+    try:
+        with TestClient(create_app()) as client:
+            place = client.get("/api/places", params={"region": "구미", "size": 1}).json()["data"]["items"][0]
+            map_response = client.post("/api/chat", json={
+                "message": f"{place['title']} 위치를 지도에서 보여줘",
+                "history": [],
+            })
+            calendar_response = client.post("/api/chat", json={
+                "message": "다음 달 경북 축제 일정을 달력으로 보여줘",
+                "history": [],
+            })
+
+        assert map_response.status_code == 200
+        assert any(reference == {
+            "type": "map",
+            "id": place["contentId"],
+            "title": place["title"],
+        } for reference in map_response.json()["data"]["references"])
+
+        assert calendar_response.status_code == 200
+        calendar_references = [
+            reference
+            for reference in calendar_response.json()["data"]["references"]
+            if reference["type"] == "festival_calendar"
+        ]
+        assert calendar_references == [{
+            "type": "festival_calendar",
+            "id": "2026-08",
+            "title": "2026년 8월 축제 캘린더",
+        }]
+    finally:
+        load_settings.cache_clear()
+
+
 def test_chat_connects_all_community_example_questions_to_posts(monkeypatch) -> None:
     captured_contexts: list[str] = []
 
@@ -277,6 +424,82 @@ def test_chat_connects_all_community_example_questions_to_posts(monkeypatch) -> 
                 assert expected_title in captured_contexts[index], question
                 assert "recommendations=" in captured_contexts[index], question
                 assert "created=" in captured_contexts[index], question
+    finally:
+        load_settings.cache_clear()
+
+
+def test_chat_returns_the_post_with_the_highest_recommendation_count(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured["context"] = kwargs["input"][-1]["content"]
+            return SimpleNamespace(
+                output_text="추천 수가 가장 높은 게시글은 '추천 1위 게시글'이며 추천 수는 3개입니다.",
+                status="completed",
+                incomplete_details=None,
+                usage=SimpleNamespace(
+                    output_tokens=20,
+                    output_tokens_details=SimpleNamespace(reasoning_tokens=5),
+                ),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str):
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(chat_service, "OpenAI", FakeOpenAI)
+    load_settings.cache_clear()
+
+    try:
+        with TestClient(create_app()) as client:
+            existing_ranking = client.get("/api/posts", params={"sort": "recommendations", "size": 1})
+            assert existing_ranking.status_code == 200
+            existing_items = existing_ranking.json()["data"]["items"]
+            previous_max = existing_items[0]["recommendationCount"] if existing_items else 0
+
+            created_posts: dict[str, int] = {}
+            for title in ("추천이 적은 게시글", "추천 1위 게시글", "추천이 없는 게시글"):
+                response = client.post("/api/posts", json={
+                    "title": title,
+                    "content": "추천 수 정렬을 검증하는 게시글입니다.",
+                    "category": "자유",
+                    "nickname": "테스터",
+                    "password": "1234",
+                })
+                assert response.status_code == 201
+                created_posts[title] = response.json()["data"]["id"]
+
+            client.post(f"/api/posts/{created_posts['추천이 적은 게시글']}/recommend")
+            highest_count = previous_max + 1
+            for _ in range(highest_count):
+                response = client.post(f"/api/posts/{created_posts['추천 1위 게시글']}/recommend")
+                assert response.status_code == 200
+
+            sorted_response = client.get("/api/posts", params={"sort": "recommendations"})
+            assert sorted_response.status_code == 200
+            assert sorted_response.json()["data"]["items"][0]["title"] == "추천 1위 게시글"
+            assert sorted_response.json()["data"]["items"][0]["recommendationCount"] == highest_count
+
+            chat_response = client.post(
+                "/api/chat",
+                json={"message": "가장 추천 수가 높은 게시글 알려줘", "history": []},
+            )
+            assert chat_response.status_code == 200
+            post_references = [
+                reference
+                for reference in chat_response.json()["data"]["references"]
+                if reference["type"] == "post"
+            ]
+            assert post_references == [{
+                "type": "post",
+                "id": str(created_posts["추천 1위 게시글"]),
+                "title": "추천 1위 게시글",
+            }]
+            assert "title=추천 1위 게시글" in captured["context"]
+            assert f"recommendations={highest_count}" in captured["context"]
+            assert "추천이 적은 게시글" not in captured["context"]
     finally:
         load_settings.cache_clear()
 

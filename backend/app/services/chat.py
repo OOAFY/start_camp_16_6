@@ -14,11 +14,16 @@ from app.schemas.festival import Festival
 from app.services.festivals import list_festivals
 from data.place_loader import ALLOWED_REGIONS
 from data.place_loader import load_place_dataset
+from data.travel_recommender import load_travel_types
 
 SYSTEM_PROMPT = """당신은 구미·경북 지역 여행을 돕는 LocalHub 안내 챗봇입니다.
 제공된 참고 정보에 근거해 한국어로 간결하고 친절하게 답하세요.
 참고 정보에 없는 가격, 일정, 후기, 편의시설 등을 추측하지 마세요.
 커뮤니티 게시글은 작성자의 경험과 추천으로 구분해 요약하고 게시글 제목을 함께 안내하세요.
+지도 또는 축제 캘린더 질문에는 답변 아래의 관련 링크를 누르면 해당 화면으로 이동할 수 있다고 안내하세요.
+여행 성향이 제공되면 사용자의 명시 조건을 지키면서 성향 키워드와 태그가 맞는 장소를 우선 안내하고, 일치 태그를 추천 이유에 반영하세요.
+여행 성향이 제공된 경우 성향 정보가 없다고 말하거나 성향을 다시 질문하지 마세요.
+여행 성향이 없더라도 검색된 장소가 있으면 일반 여행지 관점에서 최대 3곳을 먼저 추천하고, 취향 테스트 권유는 마지막 한 문장으로만 안내하세요. 번호가 붙은 추가 질문 선택지는 나열하지 마세요.
 정보가 부족하면 부족하다고 명확히 말하고, 제공된 대화 기록을 고려하세요."""
 
 logger = logging.getLogger(__name__)
@@ -47,6 +52,19 @@ POST_CATEGORIES = {
     "자유": {"자유"},
     "여행": {"여행", "여행지", "후기", "산책", "데이트", "주말", "나들이", "아이", "가족"},
 }
+PLACE_STOP_WORDS = {
+    "지도", "지도에서", "위치", "좌표", "장소", "여행지", "명소", "주변", "근처",
+    "보여줘", "알려줘", "찾아줘", "열어줘", "보고", "싶어", "몇", "여러", "추천한",
+    "추천해줘", "추천", "가기", "가고", "갈", "좋은", "만한", "어디에", "어디야",
+    "나한테", "나에게", "내게", "나를", "좋을만한", "어울리는", "맞는", "괜찮은",
+}
+PLACE_TERM_GROUPS = (
+    {"아이", "어린이", "가족", "자녀", "키즈", "체험"},
+    {"맛집", "음식", "음식점", "먹거리", "식당", "시장"},
+    {"산책", "걷기", "둘레길", "공원", "트레킹"},
+    {"데이트", "연인", "커플", "코스"},
+    {"관광지", "명소", "여행", "여행지"},
+)
 
 
 def _terms(message: str) -> list[str]:
@@ -87,9 +105,100 @@ def _post_category(message: str) -> str | None:
     return None
 
 
+def _travel_preference(travel_type: str | None) -> dict | None:
+    if not travel_type:
+        return None
+    config = load_travel_types().get(travel_type)
+    if not config:
+        return None
+    return {"code": travel_type, **config}
+
+
+def _is_generic_travel_recommendation(message: str) -> bool:
+    compact_message = re.sub(r"\s+", "", message)
+    return "추천" in compact_message and any(term in compact_message for term in (
+        "여행지", "장소", "가볼만한곳", "갈만한곳", "명소",
+    ))
+
+
+def _find_places(
+    places: list[dict],
+    message: str,
+    excluded_ids: set[str],
+    travel_type: str | None = None,
+    limit: int = 3,
+) -> list[dict]:
+    original_terms = {
+        normalized
+        for term in _terms(message)
+        if len(normalized := _normalize_post_term(term)) >= 2 and normalized not in PLACE_STOP_WORDS
+    }
+    expanded_terms = set(original_terms)
+    for group in PLACE_TERM_GROUPS:
+        if original_terms & group:
+            expanded_terms.update(group)
+
+    preference = _travel_preference(travel_type)
+    preference_keywords = [keyword.lower() for keyword in preference["keywords"]] if preference else []
+    ranked: list[tuple[int, int, dict]] = []
+    for place in places:
+        if place.get("contentId") in excluded_ids:
+            continue
+        title = str(place.get("title", "")).lower()
+        address = str(place.get("address", "")).lower()
+        region = str(place.get("region", "")).lower()
+        content_type = str(place.get("contentType", "")).lower()
+        tags = " ".join(place.get("tags", [])).lower()
+        score = 0
+        for term in expanded_terms:
+            weight = 2 if term in original_terms else 1
+            if term in title:
+                score += 6 * weight
+            if term in tags:
+                score += 4 * weight
+            if term in content_type:
+                score += 3 * weight
+            if term in region:
+                score += 2 * weight
+            if term in address:
+                score += weight
+        preference_score = sum(
+            1
+            for tag in place.get("tags", [])
+            if any(keyword in tag.lower() or tag.lower() in keyword for keyword in preference_keywords)
+        )
+        if any(keyword in content_type for keyword in preference_keywords):
+            preference_score += 1
+
+        # 질문 조건이 있으면 일치 후보 안에서 성향으로 정렬하고, 조건이 없으면 성향 태그 자체로 후보를 만듭니다.
+        if score > 0 or (not original_terms and preference_score > 0):
+            ranked.append((score + preference_score * 4, preference_score, place))
+
+    if preference is None and _is_generic_travel_recommendation(message):
+        travel_content_types = {"관광지", "문화시설", "레포츠"}
+        travel_candidates = [item for item in ranked if item[2].get("contentType") in travel_content_types]
+        if travel_candidates:
+            ranked = travel_candidates
+
+    ranked.sort(key=lambda item: (item[0], item[1], item[2].get("title", "")), reverse=True)
+    return [place for _, _, place in ranked[:limit]]
+
+
+def _is_recommendation_ranking_question(message: str) -> bool:
+    """게시글 내용 추천이 아니라 DB 추천 수 순위를 묻는 질문인지 판별합니다."""
+    compact_message = re.sub(r"\s+", "", message)
+    recommendation_count_terms = ("추천수", "추천횟수", "추천개수", "추천건수")
+    ranking_terms = ("가장", "제일", "최고", "높은", "많은", "1위", "인기")
+    return (
+        any(term in compact_message for term in recommendation_count_terms)
+        and any(term in compact_message for term in ranking_terms)
+    )
+
+
 def _find_posts(db: Session, message: str, limit: int = 5) -> list[Post]:
     original_terms, expanded_terms = _post_search_terms(message)
     category = _post_category(message) if _is_community_question(message) else None
+    recommendation_ranking_intent = _is_recommendation_ranking_question(message)
 
     query = select(Post)
     if category:
@@ -107,14 +216,14 @@ def _find_posts(db: Session, message: str, limit: int = 5) -> list[Post]:
                 score += 4 * weight
             if term in content:
                 score += weight
-        if score > 0 or not expanded_terms:
+        # 추천 수 순위 질문은 제목·본문 키워드와 무관하게 모든 후보를 정렬해야 합니다.
+        if score > 0 or not expanded_terms or recommendation_ranking_intent:
             ranked.append((score, post))
 
     recent_intent = "최근" in message or "최신" in message
-    recommendation_intent = "추천" in message and len(original_terms) <= 1
     if recent_intent:
         ranked.sort(key=lambda item: (item[1].created_at, item[0], item[1].id), reverse=True)
-    elif recommendation_intent:
+    elif recommendation_ranking_intent:
         ranked.sort(
             key=lambda item: (item[1].recommendation_count, item[0], item[1].created_at, item[1].id),
             reverse=True,
@@ -124,7 +233,8 @@ def _find_posts(db: Session, message: str, limit: int = 5) -> list[Post]:
             key=lambda item: (item[0], item[1].recommendation_count, item[1].created_at, item[1].id),
             reverse=True,
         )
-    return [post for _, post in ranked[:limit]]
+    result_limit = 1 if recommendation_ranking_intent else limit
+    return [post for _, post in ranked[:result_limit]]
 
 
 def _build_client() -> OpenAI:
@@ -139,16 +249,45 @@ def _today() -> date:
     return date.today()
 
 
+def _is_map_question(message: str) -> bool:
+    compact_message = re.sub(r"\s+", "", message)
+    return any(term in compact_message for term in (
+        "지도", "위치", "어디에", "좌표", "지도에서", "지도열어", "지도보여",
+    ))
+
+
+def _is_festival_question(message: str) -> bool:
+    return any(term in message for term in ("축제", "행사", "이벤트", "캘린더", "달력"))
+
+
+def _is_calendar_question(message: str) -> bool:
+    return any(term in message for term in ("캘린더", "달력", "일정표"))
+
+
+def _festival_period(message: str) -> tuple[int, int] | None:
+    """명시 연·월과 '이번 달/다음 달'을 캘린더 이동에 사용할 연·월로 변환합니다."""
+    today = _today()
+    compact_message = re.sub(r"\s+", "", message)
+    if "다음달" in compact_message:
+        return (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+    if "이번달" in compact_message or "이달" in compact_message:
+        return today.year, today.month
+
+    year_match = re.search(r"(\d{4})\s*년", message)
+    month_match = re.search(r"(?<!\d)(1[0-2]|0?[1-9])\s*월", message)
+    if not month_match:
+        return None
+    return (int(year_match.group(1)) if year_match else today.year, int(month_match.group(1)))
+
+
 def _find_festivals(message: str) -> tuple[list[Festival], str | None]:
     """질문 속 지역·연·월을 해석해 정제된 축제 일정에서 후보를 찾습니다."""
-    if "축제" not in message:
+    if not _is_festival_question(message):
         return [], None
 
     region = next((value for value in ALLOWED_REGIONS if value in message), None)
-    year_match = re.search(r"(\d{4})\s*년", message)
-    month_match = re.search(r"(?<!\d)(1[0-2]|0?[1-9])\s*월", message)
-    year = int(year_match.group(1)) if year_match else None
-    month = int(month_match.group(1)) if month_match else None
+    period = _festival_period(message)
+    year, month = period if period else (None, None)
     upcoming_intent = any(phrase in message for phrase in (
         "가장 가까운", "가까운 시일", "다가오는", "다음 축제",
         "예정된 축제", "지금 날짜", "현재 기준", "오늘 기준",
@@ -188,9 +327,23 @@ def _find_festivals(message: str) -> tuple[list[Festival], str | None]:
     return alternatives[:requested_count], notice
 
 
-def _build_context(places, posts, festivals: list[Festival], festival_notice: str | None) -> str:
+def _build_context(
+    places,
+    posts,
+    festivals: list[Festival],
+    festival_notice: str | None,
+    travel_preference: dict | None,
+) -> str:
+    preference_keywords = travel_preference["keywords"] if travel_preference else []
+    preference_lines = []
+    if travel_preference:
+        preference_lines.append(
+            f"- travel_preference: code={travel_preference['code']} / name={travel_preference['name']} / "
+            f"keywords={', '.join(preference_keywords)}"
+        )
     place_lines = [
-        f"- place: {place['title']} / {place['address']} / {', '.join(place.get('tags', []))}"
+        f"- place: {place['title']} / {place['address']} / tags={', '.join(place.get('tags', []))} / "
+        f"preference_matches={', '.join(tag for tag in place.get('tags', []) if any(keyword in tag or tag in keyword for keyword in preference_keywords)) or '없음'}"
         for place in places
     ]
     post_lines = [
@@ -204,28 +357,59 @@ def _build_context(places, posts, festivals: list[Festival], festival_notice: st
         for festival in festivals
     ]
     notice_lines = [f"- festival_search_notice: {festival_notice}"] if festival_notice else []
-    return "\n".join(notice_lines + festival_lines + place_lines + post_lines)
+    return "\n".join(preference_lines + notice_lines + festival_lines + place_lines + post_lines)
 
 
 def create_grounded_answer(db: Session, payload: ChatRequest) -> ChatData:
-    terms = _terms(payload.message)
     places = load_place_dataset()
+    travel_preference = _travel_preference(payload.travel_type)
     festivals, festival_notice = _find_festivals(payload.message)
     festival_ids = {festival.content_id for festival in festivals}
-    matched_places = [place for place in places if any(
-        term in " ".join([place.get("title", ""), place.get("address", ""), " ".join(place.get("tags", []))]).lower()
-        for term in terms
-    ) and place.get("contentId") not in festival_ids][:3]
+    map_intent = _is_map_question(payload.message)
+    if _is_festival_question(payload.message) and not map_intent:
+        matched_places = []
+    else:
+        matched_places = _find_places(
+            places,
+            payload.message,
+            set() if map_intent else festival_ids,
+            travel_type=payload.travel_type,
+        )
 
     posts = _find_posts(db, payload.message)
 
-    references = [
+    calendar_references: list[ChatReference] = []
+    if _is_calendar_question(payload.message):
+        period = _festival_period(payload.message)
+        if period is None and festivals:
+            period = (festivals[0].start_date.year, festivals[0].start_date.month)
+        if period is None:
+            today = _today()
+            period = (today.year, today.month)
+        year, month = period
+        calendar_references.append(ChatReference(
+            type="festival_calendar",
+            id=f"{year:04d}-{month:02d}",
+            title=f"{year}년 {month}월 축제 캘린더",
+        ))
+
+    references = calendar_references + [
         ChatReference(type="festival", id=festival.content_id, title=festival.title)
         for festival in festivals
     ]
-    references += [ChatReference(type="place", id=place["contentId"], title=place["title"]) for place in matched_places]
+    place_reference_type = "map" if map_intent else "place"
+    references += [
+        ChatReference(type=place_reference_type, id=place["contentId"], title=place["title"])
+        for place in matched_places
+    ]
     references += [ChatReference(type="post", id=str(post.id), title=post.title) for post in posts]
-    context = _build_context(matched_places, posts, festivals, festival_notice) or "검색된 참고 정보 없음"
+    context = _build_context(
+        matched_places,
+        posts,
+        festivals,
+        festival_notice,
+        travel_preference,
+    ) or "검색된 참고 정보 없음"
     messages = [
         {"role": item.role, "content": item.content}
         for item in payload.history[-10:]

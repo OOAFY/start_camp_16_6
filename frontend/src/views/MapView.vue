@@ -62,9 +62,12 @@ import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { fetchPlaceDetail, fetchPlaces } from '../api'
 import searchIcon from '../assets/search.png'
 import PlaceDetailModal from '../components/PlaceDetailModal.vue'
+
+const route = useRoute()
 
 const DEFAULT_CENTER = [36.1195, 128.3446]
 const DEFAULT_ZOOM = 9
@@ -293,6 +296,21 @@ function renderMarkers() {
   }
 }
 
+async function focusRequestedPlace(contentId = route.query.selected) {
+  const requestedId = String(contentId || '')
+  if (!requestedId || !map) return
+
+  const place = places.value.find((item) => item.contentId === requestedId)
+  if (!place) return
+
+  selectedRegion.value = 'all'
+  searchText.value = ''
+  await nextTick()
+  renderMarkers()
+  map.setView([place.latitude, place.longitude], 15)
+  await openPlace(place)
+}
+
 async function loadPlaces() {
   loading.value = true
   errorMessage.value = ''
@@ -309,6 +327,7 @@ async function loadPlaces() {
     initializeMap()
     map?.invalidateSize()
     renderMarkers()
+    await focusRequestedPlace()
   } catch (error) {
     errorMessage.value = error?.message || '잠시 후 다시 시도해 주세요.'
   } finally {
@@ -329,6 +348,7 @@ async function openPlace(place) {
 }
 
 watch(visiblePlaces, () => renderMarkers(), { flush: 'post' })
+watch(() => route.query.selected, (contentId) => focusRequestedPlace(contentId))
 
 onMounted(loadPlaces)
 

@@ -53,7 +53,7 @@ watch(resultCode, () => {
 })
 
 onMounted(() => {
-  const savedType = sessionStorage.getItem(RESULT_KEY)
+  const savedType = sessionStorage.getItem(RESULT_KEY) || localStorage.getItem(RESULT_KEY)
   const onboardingSeen = sessionStorage.getItem(ONBOARDING_KEY) === 'true'
 
   if (savedType) {
@@ -76,13 +76,12 @@ function completeTravelTest(typeCode) {
   showTravelTest.value = false
   sessionStorage.setItem(ONBOARDING_KEY, 'true')
   sessionStorage.setItem(RESULT_KEY, typeCode)
+  localStorage.setItem(RESULT_KEY, typeCode)
   loadPlaces()
 }
 
 function previewType(code) {
-  resultCode.value = code
-  hasResult.value = true
-  loadPlaces()
+  completeTravelTest(code)
 }
 
 // Helper: map travel type -> option letter (based on travel_test_questions.json)
@@ -205,7 +204,7 @@ function normalizeHomePlace(place) {
           >
             <img :src="image.src" :alt="image.alt" />
           </div>
-          <div class="result-badge">
+          <div v-if="hasResult" class="result-badge">
             <span class="result-icon" :class="resultType.tone">
               <img :src="resultType.iconSrc" :alt="resultType.name" />
             </span>
@@ -215,6 +214,13 @@ function normalizeHomePlace(place) {
             </span>
             <b aria-hidden="true">✦</b>
           </div>
+          <button v-else class="result-badge result-badge--empty" type="button" @click="openTravelTest">
+            <span>
+              <small>아직 여행 성향이 없어요</small>
+              <strong>취향 테스트 시작하기</strong>
+            </span>
+            <b aria-hidden="true">✦</b>
+          </button>
         </div>
       </section>
 
@@ -429,6 +435,20 @@ function normalizeHomePlace(place) {
   align-self: start;
   color: #ff8b38;
   font-size: 22px;
+}
+
+.result-badge--empty {
+  grid-template-columns: 1fr auto;
+  color: var(--navy);
+  text-align: left;
+  border: 0;
+  cursor: pointer;
+}
+
+.result-badge--empty span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .type-grid {
